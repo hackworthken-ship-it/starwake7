@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Starwake — Quest 3 Space Flight</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #02030a; overflow: hidden;
+    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+  #app { position: fixed; inset: 0; }
+  #app canvas { display: block; }
+
+  #loading-screen {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, #0a1128 0%, #02030a 70%);
+    color: #eaf6ff; gap: 18px; transition: opacity 0.5s ease;
+  }
+  #loading-screen.hidden { opacity: 0; pointer-events: none; }
+  #loading-title {
+    font-size: 2rem; font-weight: 800; letter-spacing: 0.12em;
+    background: linear-gradient(90deg, #8fd6ff, #a68bff);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  #loading-track {
+    width: min(320px, 70vw); height: 6px; border-radius: 4px;
+    background: rgba(255,255,255,0.12); overflow: hidden;
+  }
+  #loading-bar {
+    height: 100%; width: 0%; border-radius: 4px;
+    background: linear-gradient(90deg, #39d0ff, #8a5bff);
+    transition: width 0.15s ease;
+  }
+  #loading-sub { font-size: 0.8rem; letter-spacing: 0.08em; color: #6f8ab0; text-transform: uppercase; }
+
+  #damage-flash {
+    position: fixed; inset: 0; z-index: 40; pointer-events: none;
+    background: radial-gradient(ellipse at center, rgba(255,40,60,0) 40%, rgba(255,20,40,0.65) 100%);
+    opacity: 0; transition: opacity 0.15s ease-out;
+  }
+
+  /* VRButton (injected by three.js) gets restyled to match the theme */
+  #app + button, body > button {
+    position: fixed !important; bottom: 24px !important; left: 50% !important;
+    transform: translateX(-50%);
+    padding: 10px 22px !important; border-radius: 999px !important;
+    background: rgba(10,16,34,0.75) !important; color: #8fd6ff !important;
+    border: 1px solid rgba(143,214,255,0.5) !important;
+    font-weight: 600 !important; letter-spacing: 0.05em !important;
+    z-index: 30;
+  }
+
+  #hint {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+    color: #6f8ab0; font-size: 0.75rem; letter-spacing: 0.05em;
+    text-transform: uppercase; z-index: 20; pointer-events: none;
+    text-align: center;
+  }
+
+  /* Volume settings panel — also used as the WebXR dom-overlay root, so it
+     stays visible and clickable while in an immersive VR session on
+     browsers that support that feature (including the Quest Browser). */
+  #settings-toggle {
+    position: fixed; top: 16px; right: 16px; z-index: 35;
+    width: 40px; height: 40px; border-radius: 50%;
+    background: rgba(10,16,34,0.75); border: 1px solid rgba(143,214,255,0.5);
+    color: #8fd6ff; font-size: 1.1rem; cursor: pointer;
+  }
+  #settings-panel {
+    position: fixed; top: 64px; right: 16px; z-index: 34;
+    width: 220px; padding: 14px 16px 16px;
+    background: rgba(8,13,28,0.88); border: 1px solid rgba(143,214,255,0.4);
+    border-radius: 14px; color: #eaf6ff;
+    font-size: 0.8rem; display: none;
+  }
+  #settings-panel.open { display: block; }
+  #settings-panel h3 {
+    margin: 0 0 12px; font-size: 0.75rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #8fd6ff; font-weight: 700;
+  }
+  .fader-row { margin-bottom: 12px; }
+  .fader-row:last-child { margin-bottom: 0; }
+  .fader-row label {
+    display: flex; justify-content: space-between; margin-bottom: 4px;
+    color: #bcd6ee;
+  }
+  .fader-row input[type="range"] {
+    width: 100%; accent-color: #8fd6ff; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+  <div id="loading-screen">
+    <div id="loading-title">STARWAKE</div>
+    <div id="loading-track"><div id="loading-bar"></div></div>
+    <div id="loading-sub">Loading ships &amp; stars…</div>
+  </div>
+
+  <script>
+    // This runs immediately as a plain (non-module) script, so it still
+    // works even if the ES module below fails to execute entirely — e.g.
+    // when the page is opened by double-clicking the file instead of being
+    // served over http(s), which browsers block for <script type="module">.
+    (function () {
+      var sub = document.getElementById('loading-sub');
+      var bar = document.getElementById('loading-bar');
+      if (location.protocol === 'file:') {
+        sub.innerHTML = 'This page needs to be served over http(s) — it can\u2019t run by double-clicking the file.<br>See README.md for a one-line command to start a local server, then open the http:// link it prints.';
+        sub.style.color = '#ff5b7a';
+        bar.style.background = '#ff5b7a';
+        bar.style.width = '100%';
+        return;
+      }
+      window.addEventListener('error', function (e) {
+        if (window.__starwakeLoaded) return;
+        sub.textContent = 'Error: ' + (e.message || 'a script failed to load') + ' (see browser console for details)';
+        sub.style.color = '#ff5b7a';
+      });
+      setTimeout(function () {
+        var screen = document.getElementById('loading-screen');
+        if (screen && !screen.classList.contains('hidden') && !window.__starwakeLoaded) {
+          sub.innerHTML = 'Still stuck after 8s. Open the browser console (F12) for the real error.<br>Common causes: the page isn\u2019t served over http(s), or an asset failed to load.';
+          sub.style.color = '#ffcf39';
+        }
+      }, 8000);
+    })();
+  </script>
+
+  <div id="damage-flash"></div>
+  <div id="hint">Desktop: Arrow / WASD to steer · Space to shoot/confirm · C to swap ship &nbsp;|&nbsp; Quest: thumbstick to steer, trigger to shoot/confirm, grip for sound settings, click stick to swap ship</div>
+
+  <button id="settings-toggle" title="Sound settings">&#9881;</button>
+  <div id="settings-panel">
+    <h3>Sound</h3>
+    <div class="fader-row">
+      <label><span>Music</span><span id="music-vol-val">35%</span></label>
+      <input type="range" id="music-vol" min="0" max="100" value="35" />
+    </div>
+    <div class="fader-row">
+      <label><span>Sound Effects</span><span id="sfx-vol-val">100%</span></label>
+      <input type="range" id="sfx-vol" min="0" max="100" value="100" />
+    </div>
+  </div>
+
+  <div id="app"></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/build/three.module.js",
+      "three/addons/": "./vendor/three/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

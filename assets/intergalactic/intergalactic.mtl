@@ -1,0 +1,14 @@
+# Cleaned MTL for Intergalactic Spaceship
+# Note: the original texture files weren't included in the source archive
+# (the .mtl pointed at a ../textures/ folder that wasn't uploaded), so this
+# uses a plain metallic-gray material instead of missing image maps.
+
+newmtl Material
+Ns 120.0
+Ka 0.05 0.05 0.06
+Kd 0.55 0.58 0.62
+Ks 0.7 0.7 0.75
+Ke 0.0 0.0 0.0
+Ni 1.0
+d 1.0
+illum 2
