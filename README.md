@@ -12,25 +12,30 @@ Runs in any modern desktop browser, and in immersive VR on the **Meta Quest
 
 ## Controls
 
-- **Desktop:** Arrow keys or WASD to steer, Space (or click) to shoot /
-  confirm menus, **C** to swap ships.
-- **Quest 3:** Steer with the **thumbstick**, **trigger** to shoot / confirm
-  menus, click the **thumbstick** to swap ships, **grip** to open the sound
-  settings panel.
+- **Desktop:** Arrow keys or WASD to steer, Space (or click) to shoot
+  straight ahead / confirm menus, **C** to swap ships.
+- **Quest 3:** Steer by physically tilting the **right controller** — point
+  it the way you want to go, like a flight stick. **Trigger** shoots in
+  whatever direction you're currently pointing (not just straight ahead) and
+  also confirms menus. **A** = next ship, **B** = previous ship. **Grip**
+  opens the in-VR sound settings panel.
 
 ## Switching ships
 
-Press **C** (desktop) or click the thumbstick (VR) any time to cycle
-Rocket → Transport Shuttle → E-45 Aircraft → Intergalactic Spaceship → back
-to Rocket. A "NOW FLYING" notice confirms the swap. Each ship has its own
-size, engine glow, and exhaust trail tuned individually.
+Press **C** (desktop) or **A**/**B** on the right controller (VR) to cycle
+Rocket → Transport Shuttle → E-45 Aircraft → Intergalactic Spaceship (A goes
+forward through the list, B goes backward). A "NOW FLYING" notice confirms
+the swap. Each ship has its own size, engine glow, and exhaust trail tuned
+individually.
 
 ## End-of-wave replay
 
-After docking with the shuttle, the camera spins a full 360° in place to
-show every ring from that wave — green for ones you flew through, red for
-ones you missed, each still showing its point value. Press Space (desktop)
-or the trigger (VR) at any time to skip straight to the wave-clear screen.
+After docking with the shuttle, the camera turns to face the path you just
+flew, then rises into a bird's-eye view showing every ring from that wave —
+green for ones you flew through, red for ones you missed, each still
+showing its point value. It holds that overview for a couple seconds, then
+glides back down to exactly where you docked. Press Space (desktop) or the
+trigger (VR) at any time to skip straight to the wave-clear screen.
 
 ## Sound
 

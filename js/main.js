@@ -138,7 +138,7 @@ manager.onError = (url) => {
 manager.onLoad = () => {
   window.__starwakeLoaded = true;
   loadingScreen.classList.add('hidden');
-  showMessage('STARWAKE', 'Fly the shrinking gate corridor — smaller rings are worth more.\nMiss a ring and it flashes red. Shoot asteroids before they arrive\nfor bonus points, or just dodge them. Dock to warp on — and watch the\nreplay of your run (press Space/Trigger any time to skip it).\n\nDesktop: Arrow/WASD to steer, Space to shoot/start, C to swap ship\nQuest: thumbstick to steer, trigger to shoot/start, click stick to swap ship', 'start');
+  showMessage('STARWAKE', 'Fly the shrinking gate corridor — smaller rings are worth more.\nMiss a ring and it flashes red. Shoot asteroids before they arrive\nfor bonus points, or just dodge them. Dock to warp on — and watch the\nreplay of your run (press Space/Trigger any time to skip it).\n\nDesktop: Arrow/WASD to steer, Space to shoot/start, C to swap ship\nQuest: tilt controller to steer, trigger to shoot/start, A/B to swap ship', 'start');
 };
 
 // Safety net: if loading stalls (e.g. a blocked/failed asset that never
@@ -148,7 +148,7 @@ setTimeout(() => {
     console.warn('Loading manager did not finish in time — forcing start.');
     window.__starwakeLoaded = true;
     loadingScreen.classList.add('hidden');
-    showMessage('STARWAKE', 'Fly the shrinking gate corridor — smaller rings are worth more.\nMiss a ring and it flashes red. Shoot asteroids before they arrive\nfor bonus points, or just dodge them. Dock to warp on — and watch the\nreplay of your run (press Space/Trigger any time to skip it).\n\nDesktop: Arrow/WASD to steer, Space to shoot/start, C to swap ship\nQuest: thumbstick to steer, trigger to shoot/start, click stick to swap ship', 'start');
+    showMessage('STARWAKE', 'Fly the shrinking gate corridor — smaller rings are worth more.\nMiss a ring and it flashes red. Shoot asteroids before they arrive\nfor bonus points, or just dodge them. Dock to warp on — and watch the\nreplay of your run (press Space/Trigger any time to skip it).\n\nDesktop: Arrow/WASD to steer, Space to shoot/start, C to swap ship\nQuest: tilt controller to steer, trigger to shoot/start, A/B to swap ship', 'start');
   }
 }, 15000);
 
@@ -341,10 +341,11 @@ function mountShip(key) {
   trailMesh.scale.copy(cfg.trailScale);
 }
 
-function switchShip() {
+function switchShip(dir = 1) {
   if (!shipsReady) return;
   const idx = SHIP_ORDER.indexOf(currentShipKey);
-  mountShip(SHIP_ORDER[(idx + 1) % SHIP_ORDER.length]);
+  const next = (idx + dir + SHIP_ORDER.length) % SHIP_ORDER.length;
+  mountShip(SHIP_ORDER[next]);
   showShipNotice(SHIPS[currentShipKey].label);
   sfxConfirm();
 }
@@ -567,31 +568,41 @@ function spawnAsteroid(z) {
   });
 }
 
-function fireProjectile() {
+function fireProjectile(direction) {
   if (state !== STATE.PLAYING) return;
   if (shootCooldownTimer > 0) return;
   shootCooldownTimer = SHOOT_COOLDOWN;
   const origin = new THREE.Vector3();
   shipMount.getWorldPosition(origin);
-  origin.z -= 1.2; // spawn just ahead of the nose tip
+  // default: straight ahead (desktop). In VR, callers pass the controller's
+  // actual pointing direction so shots go wherever you're aiming.
+  const dir = (direction ? direction.clone() : new THREE.Vector3(0, 0, -1)).normalize();
+  origin.addScaledVector(dir, 1.2); // spawn just ahead of the nose tip
   const mesh = new THREE.Mesh(projGeo, projMat);
   mesh.position.copy(origin);
   scene.add(mesh);
-  projectiles.push({ mesh, x: origin.x, y: origin.y });
+  projectiles.push({
+    mesh,
+    vx: dir.x * PROJECTILE_SPEED, vy: dir.y * PROJECTILE_SPEED, vz: dir.z * PROJECTILE_SPEED,
+    life: 0,
+  });
   sfxShoot();
 }
 
 function updateProjectiles(dt) {
-  const dz = PROJECTILE_SPEED * dt;
   outer: for (let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
-    p.mesh.position.z -= dz;
-    const z = p.mesh.position.z;
+    p.mesh.position.x += p.vx * dt;
+    p.mesh.position.y += p.vy * dt;
+    p.mesh.position.z += p.vz * dt;
+    p.life += dt;
 
     for (let j = obstacles.length - 1; j >= 0; j--) {
       const o = obstacles[j];
       if (o.type !== 'asteroid') continue;
-      const dxp = o.x - p.x, dyp = o.y - p.y, dzp = o.mesh.position.z - z;
+      const dxp = o.mesh.position.x - p.mesh.position.x;
+      const dyp = o.mesh.position.y - p.mesh.position.y;
+      const dzp = o.mesh.position.z - p.mesh.position.z;
       if (Math.abs(dzp) < o.radius + 0.6 && Math.hypot(dxp, dyp) < o.radius + 0.4) {
         score += o.points;
         spawnPopup(o.mesh.position.clone(), `+${o.points}`, '#8ff5ff');
@@ -604,7 +615,9 @@ function updateProjectiles(dt) {
         continue outer;
       }
     }
-    if (z < SPAWN_Z - 20) {
+    // shots can now travel in any direction, so use a lifetime cutoff
+    // instead of a fixed-Z despawn bound
+    if (p.life > 2.2) {
       scene.remove(p.mesh);
       projectiles.splice(i, 1);
     }
@@ -1182,19 +1195,39 @@ function handleConfirm() {
   }
 }
 
-function getXRAxes() {
+// Finds which of our two three.js controller Groups corresponds to a given
+// handedness, by matching index into session.inputSources (the same index
+// three.js's WebXRManager uses for getController(0)/getController(1)).
+function getControllerByHandedness(handedness) {
   const session = renderer.xr.getSession();
   if (!session) return null;
-  for (const src of session.inputSources) {
-    if (src.handedness === 'right' && src.gamepad) {
-      const a = src.gamepad.axes;
-      // most Quest controller mappings expose thumbstick on axes[2],[3]
-      const x = a.length >= 4 ? a[2] : (a[0] || 0);
-      const y = a.length >= 4 ? a[3] : (a[1] || 0);
-      return { x, y: -y };
+  const sources = session.inputSources;
+  for (let i = 0; i < sources.length; i++) {
+    if (sources[i].handedness === handedness && sources[i].gamepad) {
+      return controllers[i] || null;
     }
   }
   return null;
+}
+// The controller used for both steering and aiming — right hand preferred
+// (matching where the trigger/A/B buttons are), falling back to left so
+// steering still works if only one controller is active.
+function getSteeringController() {
+  return getControllerByHandedness('right') || getControllerByHandedness('left');
+}
+// Ship direction (and aim direction) both follow wherever this controller is
+// physically pointed, read straight from its tracked orientation — this
+// doesn't depend on thumbstick axis-index conventions at all, which is what
+// was failing before.
+const _steerForward = new THREE.Vector3();
+function getXRSteering() {
+  const controller = getSteeringController();
+  if (!controller) return null;
+  _steerForward.set(0, 0, -1).applyQuaternion(controller.quaternion);
+  // ~30° of controller tilt gives full steering deflection
+  const x = THREE.MathUtils.clamp(_steerForward.x / 0.5, -1, 1);
+  const y = THREE.MathUtils.clamp(_steerForward.y / 0.5, -1, 1);
+  return { x, y, forward: _steerForward };
 }
 function getXRTrigger() {
   const session = renderer.xr.getSession();
@@ -1212,18 +1245,24 @@ function getXRSqueeze() {
   }
   return false;
 }
-function getXRThumbstickClick() {
+// A/B are physically on the right controller (X/Y are the left-hand
+// equivalents) — used here specifically to swap ships.
+function getXRRightButton(index) {
   const session = renderer.xr.getSession();
   if (!session) return false;
   for (const src of session.inputSources) {
-    if (src.gamepad && src.gamepad.buttons[3] && src.gamepad.buttons[3].pressed) return true;
+    if (src.handedness === 'right' && src.gamepad && src.gamepad.buttons[index] && src.gamepad.buttons[index].pressed) {
+      return true;
+    }
   }
   return false;
 }
 let prevTrigger = false;
 let prevSqueeze = false;
-let prevThumbClick = false;
+let prevButtonA = false;
+let prevButtonB = false;
 let prevDirX = 0, prevDirY = 0;
+
 
 // ---------- Game flow ---------------------------------------------------------
 function startGame() {
@@ -1269,12 +1308,30 @@ function flashDamage() {
 // ---------- End-of-wave flyover replay --------------------------------------
 // Rings are cheap to rebuild from waveRingHistory (position + hit/miss are
 // all that's recorded) rather than kept alive in the scene the whole wave.
+//
+// Choreography: turn 180° to face the trail you just flew, pull back and
+// rise for a bird's-eye view of every ring, hold there a couple seconds,
+// then glide back to exactly where you docked.
 const REPLAY_SPACING = 5.5;
-const REPLAY_DURATION = 4.5;
+const PHASE_TURN = 1.1;
+const PHASE_ZOOM = 1.4;
+const PHASE_DWELL = 2.6;
+const PHASE_RETURN = 1.5;
+const OVERVIEW_Y = 20;
+const OVERVIEW_Z_BACK = -9;
+
 let replayRings = [];
-let replayTimer = 0;
+let replayPhase = 'turn';
+let replayPhaseTimer = 0;
 let replayOnComplete = null;
-const replayStartRigPos = new THREE.Vector3();
+const replayDockPos = new THREE.Vector3();   // exact position/orientation at docking — we return here
+const replayDockQuat = new THREE.Quaternion();
+const replayTurnedQuat = new THREE.Quaternion();
+const replayOverviewPos = new THREE.Vector3();
+const replayOverviewQuat = new THREE.Quaternion();
+const _replayTmpMat = new THREE.Matrix4();
+
+function easeInOutQuad(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
 
 function buildReplayRing(entry, zOffset) {
   const color = entry.hit ? RING_HIT_COLOR : RING_MISS_COLOR;
@@ -1294,26 +1351,32 @@ function startReplay(onComplete) {
   if (waveRingHistory.length === 0) { onComplete(); return; }
 
   state = STATE.REPLAY;
-  replayTimer = 0;
-  replayStartRigPos.copy(rig.position);
+  replayPhase = 'turn';
+  replayPhaseTimer = 0;
+
+  replayDockPos.copy(rig.position);
+  replayDockQuat.copy(rig.quaternion); // always identity during normal flight, but read it properly anyway
+  replayTurnedQuat.setFromEuler(new THREE.Euler(0, Math.PI, 0));
+
   const total = waveRingHistory.length;
   replayRings = waveRingHistory.map((entry) => {
     // most-recently-passed ring closest to camera, first one furthest back
     const z = (total - entry.order) * REPLAY_SPACING;
     return buildReplayRing(entry, z);
   });
-  rig.rotation.y = 0;
+  const trailMidZ = REPLAY_SPACING * (total + 1) / 2;
+  replayOverviewPos.set(0, OVERVIEW_Y, OVERVIEW_Z_BACK);
+  _replayTmpMat.lookAt(replayOverviewPos, new THREE.Vector3(0, 0, trailMidZ), new THREE.Vector3(0, 1, 0));
+  replayOverviewQuat.setFromRotationMatrix(_replayTmpMat);
+
+  rig.quaternion.copy(replayDockQuat);
 }
 
 function endReplay() {
   for (const m of replayRings) { removeRing({ mesh: m }); }
   replayRings = [];
-  rig.rotation.y = 0;
-  // leave the camera centered (where the replay settled it) rather than
-  // snapping back to wherever the ship happened to be at docking — and
-  // keep the steering state in sync so next wave doesn't jerk back to it
-  rig.position.set(0, 1.6, rig.position.z);
-  ship.x = 0; ship.y = 0; ship.vx = 0; ship.vy = 0;
+  rig.position.copy(replayDockPos);
+  rig.quaternion.copy(replayDockQuat);
   const cb = replayOnComplete;
   replayOnComplete = null;
   if (cb) cb();
@@ -1325,14 +1388,28 @@ function skipReplay() {
 }
 
 function updateReplay(dt) {
-  replayTimer += dt;
-  const t = Math.min(1, replayTimer / REPLAY_DURATION);
-  // ease in/out full 360° spin so the player can read the trail as it passes
-  const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-  rig.rotation.y = eased * Math.PI * 2;
-  rig.position.x = THREE.MathUtils.lerp(replayStartRigPos.x, 0, Math.min(1, replayTimer * 2));
-  rig.position.y = THREE.MathUtils.lerp(replayStartRigPos.y, 1.6, Math.min(1, replayTimer * 2));
-  if (replayTimer >= REPLAY_DURATION) endReplay();
+  replayPhaseTimer += dt;
+
+  if (replayPhase === 'turn') {
+    const t = Math.min(1, replayPhaseTimer / PHASE_TURN);
+    rig.position.copy(replayDockPos);
+    rig.quaternion.slerpQuaternions(replayDockQuat, replayTurnedQuat, easeInOutQuad(t));
+    if (t >= 1) { replayPhase = 'zoomout'; replayPhaseTimer = 0; }
+  } else if (replayPhase === 'zoomout') {
+    const t = easeInOutQuad(Math.min(1, replayPhaseTimer / PHASE_ZOOM));
+    rig.position.lerpVectors(replayDockPos, replayOverviewPos, t);
+    rig.quaternion.slerpQuaternions(replayTurnedQuat, replayOverviewQuat, t);
+    if (t >= 1) { replayPhase = 'dwell'; replayPhaseTimer = 0; }
+  } else if (replayPhase === 'dwell') {
+    rig.position.copy(replayOverviewPos);
+    rig.quaternion.copy(replayOverviewQuat);
+    if (replayPhaseTimer >= PHASE_DWELL) { replayPhase = 'return'; replayPhaseTimer = 0; }
+  } else if (replayPhase === 'return') {
+    const t = easeInOutQuad(Math.min(1, replayPhaseTimer / PHASE_RETURN));
+    rig.position.lerpVectors(replayOverviewPos, replayDockPos, t);
+    rig.quaternion.slerpQuaternions(replayOverviewQuat, replayDockQuat, t);
+    if (t >= 1) endReplay();
+  }
 }
 
 function completeLevel() {
@@ -1359,11 +1436,14 @@ function updateShipControl(dt) {
   if (keys['ArrowUp'] || keys['KeyW']) iy += 1;
   if (keys['ArrowDown'] || keys['KeyS']) iy -= 1;
 
-  const xr = getXRAxes();
-  if (xr) { ix = THREE.MathUtils.clamp(xr.x, -1, 1); iy = THREE.MathUtils.clamp(xr.y, -1, 1); }
+  // In VR, steering follows the physical orientation of the right controller
+  // (tilt it the way you want to go) rather than the thumbstick — this also
+  // means whichever way you're pointing is where shots go when you fire.
+  const xr = getXRSteering();
+  if (xr) { ix = xr.x; iy = xr.y; }
 
   // Directional blip whenever a new steering direction engages (works for
-  // both digital keys and the analog XR thumbstick via a deadzone).
+  // both digital keys and the analog XR controller tilt via a deadzone).
   const dirThreshold = 0.35;
   const dirX = ix > dirThreshold ? 1 : ix < -dirThreshold ? -1 : 0;
   const dirY = iy > dirThreshold ? 1 : iy < -dirThreshold ? -1 : 0;
@@ -1388,17 +1468,24 @@ function updateShipControl(dt) {
   shipMount.rotation.z = ship.tilt;
   shipMount.rotation.x = THREE.MathUtils.lerp(shipMount.rotation.x, ship.vy * 0.05, Math.min(1, dt * 6));
 
-  // XR trigger fires while playing (menu confirm and settings-panel dragging
-  // are handled separately, and settings panel takes priority over shooting)
+  // XR trigger fires while playing, aimed wherever the controller is
+  // pointing (menu confirm and settings-panel dragging are handled
+  // separately, and the settings panel takes priority over shooting)
   const trig = getXRTrigger();
-  if (trig && !prevTrigger && !vrSettingsOpen) fireProjectile();
+  if (trig && !prevTrigger && !vrSettingsOpen) {
+    const steer = getXRSteering();
+    fireProjectile(steer ? steer.forward : null);
+  }
   prevTrigger = trig;
 
-  // Thumbstick click swaps the active ship (edge-triggered), unless the
-  // settings panel is open and using the trigger for something else.
-  const thumbClick = getXRThumbstickClick();
-  if (thumbClick && !prevThumbClick && !vrSettingsOpen) switchShip();
-  prevThumbClick = thumbClick;
+  // A/B on the right controller swap ships (A = next, B = previous),
+  // unless the settings panel is open and using the buttons for something else.
+  const btnA = getXRRightButton(4);
+  if (btnA && !prevButtonA && !vrSettingsOpen) switchShip(1);
+  prevButtonA = btnA;
+  const btnB = getXRRightButton(5);
+  if (btnB && !prevButtonB && !vrSettingsOpen) switchShip(-1);
+  prevButtonB = btnB;
 }
 
 function updateObstacles(dt) {
